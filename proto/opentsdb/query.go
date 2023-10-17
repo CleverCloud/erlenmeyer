@@ -842,8 +842,8 @@ func executeQuery(w http.ResponseWriter, token string, query *QueryRequest) {
 
 		out := &bytes.Buffer{}
 		fmt.Fprint(out, "JSONSTRICT\n")
+		fmt.Fprintf(out, "'3' MINREV <%% '%s' CAPADD %%> <%% '%s' AUTHENTICATE %%> IFTE\n", token, token)
 		fmt.Fprintf(out, "'%s'\n", token)
-		fmt.Fprintf(out, "DUP AUTHENTICATE 20000000 LIMIT\n")
 
 		// OpenTSDB order: Selection, Grouping, Downsampling, Aggregation, Interpolation, Rate conversion
 		//---- Selection: FETCH
