@@ -1,7 +1,7 @@
 BUILD_DIR	:= build
 VPATH			:= $(BUILD_DIR)
 
-CC				:= go build -i -v -mod vendor
+CC				:= go build -v -mod vendor
 GITHASH 	:= $(shell git rev-parse --short HEAD)
 GITBRANCH	:= $(shell git rev-parse --abbrev-ref HEAD)
 VERSION				:= $(shell git describe --tags --candidates 1 --match '*.*')
