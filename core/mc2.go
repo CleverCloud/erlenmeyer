@@ -36,7 +36,7 @@ func (n *Node) ToWarpScript(token string, query string, step string) string {
 	}
 
 	b.WriteString("'" + token + "' 'token' STORE \n")
-	b.WriteString("$token CAPADD \n")
+	b.WriteString("$token '3' MINREV <%% 'CAPADD' EVAL %%> <%% 'AUTHENTICATE' EVAL %%> IFTE \n")
 	// keys of STACKATTRIBUTE can be found here: https://github.com/cityzendata/warp10-platform/blob/master/warp10/src/main/java/io/warp10/script/WarpScriptStack.java
 	b.WriteString("'stack.maxops.hard' STACKATTRIBUTE DUP <% ISNULL ! %> <% MAXOPS %> <% DROP %> IFTE\n")
 	b.WriteString("'fetch.limit.hard' STACKATTRIBUTE DUP <% ISNULL ! %> <% LIMIT %> <% DROP %> IFTE\n")
