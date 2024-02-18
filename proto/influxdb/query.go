@@ -366,7 +366,7 @@ func (showStatement *InfluxShowStatement) parseInfluxSeries(statementid int, txn
 
 	findSelector := fmt.Sprintf("~%s)"+separator+".*", findClass)
 
-	mc2 := fmt.Sprintf("'3' MINREV <%% '%s' CAPADD %%> <%% '%s' AUTHENTICATE EVAL %%> IFTE\n", token, token)
+	mc2 := fmt.Sprintf("'3' MINREV <%% '%s' 'CAPADD' EVAL %%> <%% '%s' 'AUTHENTICATE' EVAL %%> IFTE\n", token, token)
 	mc2 += `
 	'stack.maxops.hard' STACKATTRIBUTE DUP <% ISNULL ! %> <% MAXOPS %> <% DROP %> IFTE
 	'fetch.limit.hard' STACKATTRIBUTE DUP <% ISNULL ! %> <% LIMIT %> <% DROP %> IFTE
@@ -841,7 +841,7 @@ func parseInfluxSelect(statement *influxql.SelectStatement, statementid int, txn
 		return nil, err
 	}
 
-	authenticate := fmt.Sprintf("'3' MINREV <%% '%s' CAPADD %%> <%% '%s' AUTHENTICATE EVAL %%> IFTE\n", token, token)
+	authenticate := fmt.Sprintf("'3' MINREV <%% '%s' 'CAPADD' EVAL %%> <%% '%s' 'AUTHENTICATE' EVAL %%> IFTE\n", token, token)
 
 	mc2 = authenticate + `
 	// keys of STACKATTRIBUTE can be found here: https://github.com/cityzendata/warp10-platform/blob/master/warp10/src/main/java/io/warp10/script/WarpScriptStack.java
