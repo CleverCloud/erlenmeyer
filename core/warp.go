@@ -409,8 +409,15 @@ func (server *HTTPWarp10Server) Delete(token string, query string) error {
 }
 
 // Find is Simple Find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) Find(token string, selector string) (*http.Response, error) {
-	req, _ := http.NewRequest("GET", server.Endpoint+"/api/v0/find?selector="+selector, nil) // nolint: gas
+func (server *HTTPWarp10Server) Find(token string, selector string, active_after string) (*http.Response, error) {
+	endpoint := server.Endpoint + "/api/v0/find?selector=" + selector
+	if active_after != "" {
+		endpoint += "&activeafter=" + active_after
+	}
+
+	// Check time it takes to get the response
+	req, _ := http.NewRequest("GET", endpoint, nil) // nolint: gas
+
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("X-Warp10-Token", token)
 	req.Header.Set("X-CityzenData-Token", token)
@@ -432,8 +439,8 @@ func (server *HTTPWarp10Server) Find(token string, selector string) (*http.Respo
 }
 
 // FindGTS is find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) FindGTS(token string, selector string) (*QueryResult, error) {
-	warpResp, err := server.Find(token, selector)
+func (server *HTTPWarp10Server) FindGTS(token string, selector string, active_after string) (*QueryResult, error) {
+	warpResp, err := server.Find(token, selector, active_after)
 	if err != nil {
 		return nil, err
 	}

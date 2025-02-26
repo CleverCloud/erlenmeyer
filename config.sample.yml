@@ -1,2 +1,3 @@
 ---
-warp_endpoint: http://localhost:8080
+warp_endpoint: https://c2-warp10-clevercloud-customers.services.clever-cloud.com
+listen: 0.0.0.0:8080

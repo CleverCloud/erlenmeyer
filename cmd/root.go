@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -181,9 +182,12 @@ var RootCmd = &cobra.Command{
 		gPromQL.Any("/api/v1/query_range*", middlewares.Native(promQL.QueryRange))
 		gPromQL.Any("/api/v1/query*", middlewares.Native(promQL.InstantQuery))
 		gPromQL.Any("/api/v1/series*", middlewares.Native(promQL.FindAndDeleteSeries))
+		gPromQL.Any("/api/v1/labels", promQL.FindLabels)
+		gPromQL.Any("/api/v1/label/__name__/values*", promQL.FindClassnames)
 		gPromQL.Any("/api/v1/label/:label/values*", promQL.FindLabelsValues)
+		gPromQL.Any("/api/v1/label/:label/values", promQL.FindLabelsValues)
 		gPromQL.Any("/remote_read*", remoteRead.HandlerBuilder())
-
+		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 		// Register graphite query language
 		gGraphite := r.Group("/graphite", middlewares.Protocol("graphite"), middlewares.Deny(tokens))
 		gGraphite.Any("/render*", middlewares.Native(graphite.Render))
