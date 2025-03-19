@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
@@ -409,14 +410,16 @@ func (server *HTTPWarp10Server) Delete(token string, query string) error {
 }
 
 // Find is Simple Find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) Find(token string, selector string, active_after string) (*http.Response, error) {
+func (server *HTTPWarp10Server) Find(token string, selector string, active_after time.Time) (*http.Response, error) {
 	endpoint := server.Endpoint + "/api/v0/find?selector=" + selector
-	if active_after != "" {
-		endpoint += "&activeafter=" + active_after
+	if !active_after.IsZero() {
+		endpoint += "&activeafter=" + strconv.FormatInt(active_after.UnixMilli(), 10)
 	}
 
-	// Check time it takes to get the response
-	req, _ := http.NewRequest("GET", endpoint, nil) // nolint: gas
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("X-Warp10-Token", token)
@@ -429,7 +432,7 @@ func (server *HTTPWarp10Server) Find(token string, selector string, active_after
 
 	if warpResp.StatusCode != 200 {
 		var body []byte
-		body, err = ioutil.ReadAll(warpResp.Body)
+		body, err = io.ReadAll(warpResp.Body)
 		if err != nil {
 			return nil, err
 		}
@@ -439,7 +442,7 @@ func (server *HTTPWarp10Server) Find(token string, selector string, active_after
 }
 
 // FindGTS is find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) FindGTS(token string, selector string, active_after string) (*QueryResult, error) {
+func (server *HTTPWarp10Server) FindGTS(token string, selector string, active_after time.Time) (*QueryResult, error) {
 	warpResp, err := server.Find(token, selector, active_after)
 	if err != nil {
 		return nil, err

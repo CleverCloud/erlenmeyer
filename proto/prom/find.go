@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/prometheus/prometheus/pkg/labels"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
@@ -16,11 +19,35 @@ import (
 	"github.com/ovh/erlenmeyer/core"
 )
 
+// processMatchers processes a list of matchers and returns the class name and labels
+func processMatchers(matchers []*labels.Matcher) (string, map[string]string) {
+	className := ""
+	labels := make(map[string]string)
+
+	for _, matcher := range matchers {
+		if matcher.Name == "__name__" {
+			className = matcher.Value
+			continue
+		}
+
+		labelsValue := matcher.Value
+		switch matcher.Type.String() {
+		case "=~":
+			labelsValue = "~" + labelsValue
+		case "!=", "!~":
+			labelsValue = fmt.Sprintf("~(?!%s).*", labelsValue)
+		}
+		labels[matcher.Name] = labelsValue
+	}
+
+	return className, labels
+}
+
 // FindSeries returns the list of time series that match a certain label set.
 func (p *QL) FindSeries(w http.ResponseWriter, r *http.Request) {
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("Not authorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
 		return
 	}
 
@@ -33,33 +60,17 @@ func (p *QL) FindSeries(w http.ResponseWriter, r *http.Request) {
 	resp := []map[string]string{}
 
 	for _, s := range r.Form["match[]"] {
-		classname := s
-		labels := map[string]string{}
-
-		matchers, err := queryPromql.ParseMetricSelector(classname)
+		matchers, err := queryPromql.ParseMetricSelector(s)
 		if err != nil {
 			respondWithError(w, err, http.StatusUnprocessableEntity)
 			return
 		}
 
-		for _, matcher := range matchers {
-			if matcher.Name == "__name__" {
-				classname = fmt.Sprintf("%v", matcher.Value)
-			} else {
-				labelsValue := matcher.Value
+		className, labels := processMatchers(matchers)
 
-				if matcher.Type.String() == "=~" {
-					labelsValue = "~" + labelsValue
-				} else if matcher.Type.String() == "!=" || matcher.Type.String() == "!~" {
-					labelsValue = fmt.Sprintf("~(?!%s).*", labelsValue)
-				}
-				labels[fmt.Sprintf("%v", matcher.Name)] = fmt.Sprintf("%v", labelsValue)
-			}
-		}
-
-		findQuery := buildWarp10Selector(classname, labels)
+		findQuery := buildWarp10Selector(className, labels)
 		warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-find")
-		gtss, err := warpServer.FindGTS(token, findQuery.String(), "")
+		gtss, err := warpServer.FindGTS(token, findQuery.String(), time.Time{})
 
 		if err != nil {
 			log.WithFields(log.Fields{
@@ -105,7 +116,7 @@ func (p *QL) FindLabelsValues(ctx echo.Context) error {
 
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("not authorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
 		return nil
 	}
 
@@ -145,30 +156,14 @@ func (p *QL) FindLabelsValues(ctx echo.Context) error {
 	}
 
 	// Extract class name and build labels map
-	classname := ""
-	labels := make(map[string]string)
-
-	for _, matcher := range matcherObjs {
-		if matcher.Name == "__name__" {
-			classname = fmt.Sprintf("%v", matcher.Value)
-		} else {
-			labelsValue := matcher.Value
-
-			if matcher.Type.String() == "=~" {
-				labelsValue = "~" + labelsValue
-			} else if matcher.Type.String() == "!=" || matcher.Type.String() == "!~" {
-				labelsValue = fmt.Sprintf("~(?!%s).*", labelsValue)
-			}
-			labels[fmt.Sprintf("%v", matcher.Name)] = fmt.Sprintf("%v", labelsValue)
-		}
-	}
+	classname, labels := processMatchers(matcherObjs)
 
 	// Build the Warp10 selector
 	findQuery := buildWarp10Selector(classname, labels)
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-find-labels")
 
 	// Execute the query
-	gtss, err := warpServer.FindGTS(token, findQuery.String(), "")
+	gtss, err := warpServer.FindGTS(token, findQuery.String(), time.Time{})
 	if err != nil {
 		log.WithFields(log.Fields{
 			"query": findQuery.String(),
@@ -199,13 +194,12 @@ func (p *QL) FindLabelsValues(ctx echo.Context) error {
 
 // FindLabels returns all label names for a series
 func (p *QL) FindLabels(ctx echo.Context) error {
-	log.Info("I'm in FindLabels")
 	w := ctx.Response()
 	r := ctx.Request()
 
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("Not authorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
 		return nil
 	}
 
@@ -229,12 +223,6 @@ func (p *QL) FindLabels(ctx echo.Context) error {
 		return ctx.JSON(http.StatusOK, resp)
 	}
 
-	// Get time parameters
-	start := r.Form.Get("start")
-	if start != "" {
-		start += "000" // Convert to microseconds
-	}
-
 	// Build and execute query
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-find-labels")
 
@@ -249,25 +237,9 @@ func (p *QL) FindLabels(ctx echo.Context) error {
 			})
 		}
 
-		className := ""
-		labels := map[string]string{}
-
-		for _, m := range matcherObjs {
-			if m.Name == "__name__" {
-				className = fmt.Sprintf("%v", m.Value)
-			} else {
-				labelsValue := m.Value
-				if m.Type.String() == "=~" {
-					labelsValue = "~" + labelsValue
-				} else if m.Type.String() == "!=" || m.Type.String() == "!~" {
-					labelsValue = fmt.Sprintf("~(?!%s).*", labelsValue)
-				}
-				labels[fmt.Sprintf("%v", m.Name)] = fmt.Sprintf("%v", labelsValue)
-			}
-		}
-
+		className, labels := processMatchers(matcherObjs)
 		findQuery := buildWarp10Selector(className, labels)
-		gtss, err := warpServer.FindGTS(token, findQuery.String(), "")
+		gtss, err := warpServer.FindGTS(token, findQuery.String(), time.Time{})
 		if err != nil {
 			log.WithFields(log.Fields{
 				"query": findQuery.String(),
@@ -316,7 +288,7 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("Not authorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
 		return nil
 	}
 
@@ -367,9 +339,17 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 	}
 
 	// Get time parameters
-	start := ctx.QueryParam("start")
-	if start != "" {
-		start += "000" // Convert to microseconds
+	startTime := time.Time{}
+	if ctx.QueryParam("start") != "" {
+		var err error
+		startTimeSec, err := strconv.ParseInt(ctx.QueryParam("start"), 10, 64)
+		startTime = time.Unix(startTimeSec, 0)
+		if err != nil {
+			log.WithError(err).Error("Failed to parse start time")
+			return ctx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "failed to parse start time",
+			})
+		}
 	}
 
 	// Build and execute query
@@ -381,22 +361,8 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 
 	for _, matcher := range matchers {
 		matcherObjs, _ := queryPromql.ParseMetricSelector(matcher)
-		className := ""
-		labels := map[string]string{}
 
-		for _, m := range matcherObjs {
-			if m.Name == "__name__" {
-				className = fmt.Sprintf("~%v", m.Value)
-			} else {
-				labelsValue := m.Value
-				if m.Type.String() == "=~" {
-					labelsValue = "~" + labelsValue
-				} else if m.Type.String() == "!=" || m.Type.String() == "!~" {
-					labelsValue = fmt.Sprintf("~(?!%s).*", labelsValue)
-				}
-				labels[fmt.Sprintf("%v", m.Name)] = fmt.Sprintf("%v", labelsValue)
-			}
-		}
+		className, labels := processMatchers(matcherObjs)
 
 		uriLabel := ctx.Param("label")
 		if uriLabel != "" && uriLabel != "__name__" {
@@ -404,10 +370,12 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 		}
 
 		findQuery := buildWarp10Selector(className, labels)
-		gtss, err := warpServer.FindGTS(token, findQuery.String(), start)
+		// We want to do a regex search by default to match series names
+		selector := "~" + findQuery.String()
+		gtss, err := warpServer.FindGTS(token, selector, startTime)
 		if err != nil {
 			log.WithFields(log.Fields{
-				"query": findQuery.String(),
+				"query": selector,
 				"error": err.Error(),
 			}).Error("Error finding GTS")
 			return ctx.JSON(http.StatusInternalServerError, map[string]string{
