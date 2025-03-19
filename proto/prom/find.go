@@ -47,7 +47,7 @@ func processMatchers(matchers []*labels.Matcher) (string, map[string]string) {
 func (p *QL) FindSeries(w http.ResponseWriter, r *http.Request) {
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("please provide a READ token"), http.StatusForbidden)
 		return
 	}
 
@@ -116,7 +116,7 @@ func (p *QL) FindLabelsValues(ctx echo.Context) error {
 
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("please provide a READ token"), http.StatusForbidden)
 		return nil
 	}
 
@@ -199,7 +199,7 @@ func (p *QL) FindLabels(ctx echo.Context) error {
 
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("please provide a READ token"), http.StatusForbidden)
 		return nil
 	}
 
@@ -288,7 +288,7 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
-		respondWithError(w, errors.New("unauthorized, please provide a READ token"), http.StatusForbidden)
+		respondWithError(w, errors.New("please provide a READ token"), http.StatusForbidden)
 		return nil
 	}
 
