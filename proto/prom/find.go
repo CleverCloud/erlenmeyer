@@ -1,9 +1,11 @@
 package prom
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -107,6 +109,12 @@ type prometheusFindResponse struct {
 type prometheusFindLabelsResponse struct {
 	Status string   `json:"status"`
 	Data   []string `json:"data"`
+}
+
+// prometheusSeriesResponse represents the response format for the /api/v1/series endpoint
+type prometheusSeriesResponse struct {
+	Status string              `json:"status"`
+	Data   []map[string]string `json:"data"`
 }
 
 // FindLabelsValues is handling finding labels values
@@ -281,11 +289,16 @@ func (p *QL) FindLabels(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, resp)
 }
 
-// FindClassnames handles searching for class names based on matchers
-func (p *QL) FindClassnames(ctx echo.Context) error {
+// FindClassnamesHandler is the Echo handler for the /api/v1/label/__name__/values endpoint
+func (p *QL) FindClassnamesHandler(ctx echo.Context) error {
 	w := ctx.Response()
 	r := ctx.Request()
+	resp := prometheusFindLabelsResponse{
+		Status: "success",
+		Data:   []string{},
+	}
 
+	// Extract token
 	token := core.RetrieveToken(r)
 	if len(token) == 0 {
 		respondWithError(w, errors.New("please provide a READ token"), http.StatusUnauthorized)
@@ -294,17 +307,104 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 
 	// Parse query parameters
 	matchers := r.URL.Query()["match[]"]
-	if len(matchers) == 0 {
 
+	// Get time parameters
+	startTime := time.Time{}
+	if ctx.QueryParam("start") != "" {
+		var err error
+		startTimeSec, err := strconv.ParseInt(ctx.QueryParam("start"), 10, 64)
+		if err != nil {
+			log.WithError(err).Error("Failed to parse start time")
+			return ctx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "failed to parse start time",
+			})
+		}
+		startTime = time.Unix(startTimeSec, 0)
+
+		// Apply time range limits
+		startTime = applyTimeRangeLimits(startTime)
+	}
+
+	// Get label parameter from URI
+	uriLabel := ctx.Param("label")
+
+	// Call the core function
+	series, statusCode, err := p.FindClassnames(token, matchers, startTime, uriLabel)
+	if err != nil {
+		return ctx.JSON(statusCode, map[string]string{
+			"error": err.Error(),
+		})
+	}
+
+	for _, series := range series {
+		resp.Data = append(resp.Data, series.Class)
+	}
+
+	return ctx.JSON(http.StatusOK, resp)
+}
+
+// applyTimeRangeLimits enforces the minimum and maximum time range for the series endpoint
+func applyTimeRangeLimits(startTime time.Time) time.Time {
+	// Get the configured minimum and maximum time ranges
+	minTimeRangeStr := viper.GetString("warp10.find.activeafter.min")
+	maxTimeRangeStr := viper.GetString("warp10.find.activeafter.max")
+
+	// Parse the minimum time range
+	minDuration, err := time.ParseDuration(minTimeRangeStr)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err.Error(),
+			"value": minTimeRangeStr,
+		}).Warn("Failed to parse minimum time range, using default 24h")
+		minDuration = 24 * time.Hour
+	}
+
+	// Parse the maximum time range
+	maxDuration, err := time.ParseDuration(maxTimeRangeStr)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err.Error(),
+			"value": maxTimeRangeStr,
+		}).Warn("Failed to parse maximum time range, using default 7d")
+		maxDuration = 7 * 24 * time.Hour
+	}
+
+	// Calculate the minimum allowed start time (now - maxDuration)
+	minAllowedTime := time.Now().Add(-maxDuration)
+
+	// Calculate the maximum allowed start time (now - minDuration)
+	maxAllowedTime := time.Now().Add(-minDuration)
+
+	// Apply the limits
+	if startTime.Before(minAllowedTime) {
+		log.WithFields(log.Fields{
+			"requested": startTime,
+			"adjusted":  minAllowedTime,
+		}).Info("Adjusted start time to minimum allowed value")
+		return minAllowedTime
+	}
+
+	if startTime.After(maxAllowedTime) {
+		log.WithFields(log.Fields{
+			"requested": startTime,
+			"adjusted":  maxAllowedTime,
+		}).Info("Adjusted start time to maximum allowed value")
+		return maxAllowedTime
+	}
+
+	return startTime
+}
+
+// FindClassnames handles searching for class names based on matchers using primitive parameters
+func (p *QL) FindClassnames(token string, matchers []string, startTime time.Time, uriLabel string) ([]core.GeoTimeSeries, int, error) {
+	var resp []core.GeoTimeSeries
+
+	// If no matchers provided, return empty response
+	if len(matchers) == 0 {
 		// Grafana will try to get all class name when arriving explore page
 		// This prevent showing an error to the customer, while allowing to prevent performance
 		// bottleneck where the user is fetching 1M series
-
-		resp := prometheusFindLabelsResponse{
-			Status: "success",
-			Data:   []string{},
-		}
-		return ctx.JSON(http.StatusOK, resp)
+		return resp, http.StatusOK, nil
 	}
 
 	// Process each matcher
@@ -312,9 +412,7 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 		// Parse the matcher
 		matcherObjs, err := queryPromql.ParseMetricSelector(matcher)
 		if err != nil {
-			return ctx.JSON(http.StatusBadRequest, map[string]string{
-				"error": fmt.Sprintf("invalid matcher format: %v", err),
-			})
+			return resp, http.StatusBadRequest, fmt.Errorf("invalid matcher format: %v", err)
 		}
 
 		// Look for __name__ matcher
@@ -324,47 +422,24 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 				hasNameMatcher = true
 				// Grafana will add .* suffix and prefix to the value, but the real minimal length is 3 chars
 				if len(strings.TrimSpace(fmt.Sprintf("%v", m.Value))) < 7 {
-					return ctx.JSON(http.StatusBadRequest, map[string]string{
-						"error": "Search must contain at least 3 characters",
-					})
+					return resp, http.StatusBadRequest, fmt.Errorf("Search must contain at least 3 characters")
 				}
 			}
 		}
 
 		if !hasNameMatcher {
-			return ctx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "query must include a matcher for __name__",
-			})
-		}
-	}
-
-	// Get time parameters
-	startTime := time.Time{}
-	if ctx.QueryParam("start") != "" {
-		var err error
-		startTimeSec, err := strconv.ParseInt(ctx.QueryParam("start"), 10, 64)
-		startTime = time.Unix(startTimeSec, 0)
-		if err != nil {
-			log.WithError(err).Error("Failed to parse start time")
-			return ctx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "failed to parse start time",
-			})
+			return resp, http.StatusBadRequest, fmt.Errorf("query must include a matcher for __name__")
 		}
 	}
 
 	// Build and execute query
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-find-label-name-values")
 
-	var resp prometheusFindLabelsResponse
-	resp.Status = "success"
-	resp.Data = []string{}
-
 	for _, matcher := range matchers {
 		matcherObjs, _ := queryPromql.ParseMetricSelector(matcher)
 
 		className, labels := processMatchers(matcherObjs)
 
-		uriLabel := ctx.Param("label")
 		if uriLabel != "" && uriLabel != "__name__" {
 			labels[uriLabel] = "~.*"
 		}
@@ -378,27 +453,110 @@ func (p *QL) FindClassnames(ctx echo.Context) error {
 				"query": selector,
 				"error": err.Error(),
 			}).Error("Error finding GTS")
-			return ctx.JSON(http.StatusInternalServerError, map[string]string{
-				"error": "internal server error while searching for series",
-			})
+			return resp, http.StatusInternalServerError, fmt.Errorf("internal server error while searching for series")
 		}
 
-		for _, gts := range gtss.GTS {
-			resp.Data = append(resp.Data, gts.Class)
-		}
+		resp = append(resp, gtss.GTS...)
 	}
 
-	resp.Data = unique(resp.Data)
-	return ctx.JSON(http.StatusOK, resp)
+	return resp, http.StatusOK, nil
 }
 
 // FindAndDeleteSeries is handling /find and /delete for series
 func (p *QL) FindAndDeleteSeries(w http.ResponseWriter, r *http.Request) {
-
 	switch r.Method {
 	case "DELETE":
 		p.Delete(w, r)
 	case "GET":
 		p.FindSeries(w, r)
+	case "POST":
+		p.handleSeriesPost(w, r)
 	}
+}
+
+func (p *QL) handleSeriesPost(w http.ResponseWriter, r *http.Request) {
+	// Log the request body for debugging
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, fmt.Errorf("failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Create a new reader from the body so it can be read again
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	// Parse the form data from the request body
+	if err := r.ParseForm(); err != nil {
+		respondWithError(w, fmt.Errorf("failed to parse form data: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Get matchers from the form data
+	matchers := r.Form["match[]"]
+	if len(matchers) == 0 {
+		respondWithError(w, errors.New("no match[] parameter provided"), http.StatusBadRequest)
+		return
+	}
+
+	// Extract token
+	token := core.RetrieveToken(r)
+	if len(token) == 0 {
+		respondWithError(w, errors.New("please provide a READ token"), http.StatusUnauthorized)
+		return
+	}
+
+	// Parse start time
+	startTime := time.Time{}
+	if startStr := r.FormValue("start"); startStr != "" {
+		startTimeSec, err := strconv.ParseInt(startStr, 10, 64)
+		if err != nil {
+			respondWithError(w, fmt.Errorf("failed to parse start time: %v", err), http.StatusBadRequest)
+			return
+		}
+		startTime = time.Unix(startTimeSec, 0)
+
+		// Apply time range limits
+		startTime = applyTimeRangeLimits(startTime)
+
+		// Log the adjusted time for debugging
+		log.WithFields(log.Fields{
+			"original_start": time.Unix(startTimeSec, 0),
+			"adjusted_start": startTime,
+		}).Debug("Applied time range limits to series request")
+	}
+
+	// Call the core FindClassnames function directly with primitive parameters
+	series, statusCode, err := p.FindClassnames(token, matchers, startTime, "")
+	if err != nil {
+		respondWithError(w, err, statusCode)
+		return
+	}
+
+	// Create the Prometheus response format
+	seriesResp := prometheusSeriesResponse{
+		Status: "success",
+		Data:   make([]map[string]string, 0, len(series)),
+	}
+
+	// Transform each GeoTimeSeries to the expected Prometheus format
+	for _, gts := range series {
+		// Create a map for this series with all labels
+		seriesLabels := make(map[string]string)
+
+		// Add the class name as __name__ label
+		seriesLabels["__name__"] = gts.Class
+
+		// Add all other labels
+		for labelName, labelValue := range gts.Labels {
+			seriesLabels[labelName] = labelValue
+		}
+
+		// Add the series to the response
+		seriesResp.Data = append(seriesResp.Data, seriesLabels)
+	}
+
+	// Return the JSON response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(seriesResp)
 }
