@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ovh/erlenmeyer/core"
 	"github.com/spf13/viper"
@@ -70,7 +69,7 @@ func (c *OpenTSDB) HandleSuggest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "opentsdb-suggest")
-	result, err := warpServer.FindGTS(token, selector, time.Time{})
+	result, err := warpServer.FindGTS(token, selector, core.FindParameters{})
 
 	if err != nil {
 		c.ErrCounter.Inc()

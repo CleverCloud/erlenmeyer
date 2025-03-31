@@ -15,7 +15,7 @@ import (
 )
 
 // Delete matched series entirely from a Prometheus server
-//URL query parameters:
+// URL query parameters:
 // - match[]=<series_selector>: Repeated label matcher argument that selects the series to delete. At least one match[] argument must be provided.
 // FIXME: handle Delete
 func (p *QL) Delete(w http.ResponseWriter, r *http.Request) {

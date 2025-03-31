@@ -409,11 +409,22 @@ func (server *HTTPWarp10Server) Delete(token string, query string) error {
 	return nil
 }
 
+// FindParameters contains all parameters for the Find operation
+type FindParameters struct {
+	ActiveAfter time.Time
+	GCount     int
+}
+
 // Find is Simple Find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) Find(token string, selector string, active_after time.Time) (*http.Response, error) {
+func (server *HTTPWarp10Server) Find(token string, selector string, params FindParameters) (*http.Response, error) {
 	endpoint := server.Endpoint + "/api/v0/find?selector=" + selector
-	if !active_after.IsZero() {
-		endpoint += "&activeafter=" + strconv.FormatInt(active_after.UnixMilli(), 10)
+	if !params.ActiveAfter.IsZero() {
+		endpoint += "&activeafter=" + strconv.FormatInt(params.ActiveAfter.UnixMilli(), 10)
+	}
+	
+	// Add gcount parameter if specified
+	if params.GCount > 0 {
+		endpoint += "&gcount=" + strconv.Itoa(params.GCount)
 	}
 
 	req, err := http.NewRequest("GET", endpoint, nil)
@@ -442,8 +453,8 @@ func (server *HTTPWarp10Server) Find(token string, selector string, active_after
 }
 
 // FindGTS is find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) FindGTS(token string, selector string, active_after time.Time) (*QueryResult, error) {
-	warpResp, err := server.Find(token, selector, active_after)
+func (server *HTTPWarp10Server) FindGTS(token string, selector string, params FindParameters) (*QueryResult, error) {
+	warpResp, err := server.Find(token, selector, params)
 	if err != nil {
 		return nil, err
 	}

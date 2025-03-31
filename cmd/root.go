@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"crypto/subtle"
-	"crypto/tls"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -85,10 +84,10 @@ func initConfig() {
 	viper.SetDefault("prometheus.query.classname.replace.map", make(map[string]string))
 	viper.SetDefault("prometheus.query.labels.replace.enabled", false)
 	viper.SetDefault("prometheus.query.labels.replace.map", make(map[string]string))
-	
+
 	// Default time range limits for series endpoint
 	viper.SetDefault("warp10.find.activeafter.min", "24h")
-	viper.SetDefault("warp10.find.activeafter.max", "7d")
+	viper.SetDefault("warp10.find.activeafter.max", "168h") // 7 days = 7 * 24 hours
 
 	// Load user defined config
 	cfgFile := viper.GetString("config")
@@ -198,9 +197,6 @@ var RootCmd = &cobra.Command{
 		gGraphite.Any("/metrics/find*", middlewares.Native(graphite.Find))
 		gGraphite.Any("/metrics/expand*", middlewares.Native(graphite.Expand))
 		gGraphite.Any("/metrics/index.json*", middlewares.Native(graphite.Index))
-
-		// allow CORS * on all route
-		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 		// Register influx query language
 		i := influxdb.NewInfluxDB()

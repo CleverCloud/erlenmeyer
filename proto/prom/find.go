@@ -21,6 +21,12 @@ import (
 	"github.com/ovh/erlenmeyer/core"
 )
 
+const (
+	DEFAULT_METRIC_SELECTOR        = "(http|prometheus).*"
+	DEFAULT_METRIC_SELECTOR_GCOUNT = 100
+	MAX_GCOUNT_PER_FIND            = 200
+)
+
 // processMatchers processes a list of matchers and returns the class name and labels
 func processMatchers(matchers []*labels.Matcher) (string, map[string]string) {
 	className := ""
@@ -72,7 +78,7 @@ func (p *QL) FindSeries(w http.ResponseWriter, r *http.Request) {
 
 		findQuery := buildWarp10Selector(className, labels)
 		warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-find")
-		gtss, err := warpServer.FindGTS(token, findQuery.String(), time.Time{})
+		gtss, err := warpServer.FindGTS(token, findQuery.String(), core.FindParameters{})
 
 		if err != nil {
 			log.WithFields(log.Fields{
@@ -171,7 +177,7 @@ func (p *QL) FindLabelsValues(ctx echo.Context) error {
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-find-labels")
 
 	// Execute the query
-	gtss, err := warpServer.FindGTS(token, findQuery.String(), time.Time{})
+	gtss, err := warpServer.FindGTS(token, findQuery.String(), core.FindParameters{})
 	if err != nil {
 		log.WithFields(log.Fields{
 			"query": findQuery.String(),
@@ -247,7 +253,7 @@ func (p *QL) FindLabels(ctx echo.Context) error {
 
 		className, labels := processMatchers(matcherObjs)
 		findQuery := buildWarp10Selector(className, labels)
-		gtss, err := warpServer.FindGTS(token, findQuery.String(), time.Time{})
+		gtss, err := warpServer.FindGTS(token, findQuery.String(), core.FindParameters{})
 		if err != nil {
 			log.WithFields(log.Fields{
 				"query": findQuery.String(),
@@ -336,8 +342,19 @@ func (p *QL) FindClassnamesHandler(ctx echo.Context) error {
 		})
 	}
 
+	containsString := func(slice []string, str string) bool {
+		for _, item := range slice {
+			if item == str {
+				return true
+			}
+		}
+		return false
+	}
+
 	for _, series := range series {
-		resp.Data = append(resp.Data, series.Class)
+		if !containsString(resp.Data, series.Class) {
+			resp.Data = append(resp.Data, series.Class)
+		}
 	}
 
 	return ctx.JSON(http.StatusOK, resp)
@@ -398,13 +415,13 @@ func applyTimeRangeLimits(startTime time.Time) time.Time {
 // FindClassnames handles searching for class names based on matchers using primitive parameters
 func (p *QL) FindClassnames(token string, matchers []string, startTime time.Time, uriLabel string) ([]core.GeoTimeSeries, int, error) {
 	var resp []core.GeoTimeSeries
+	params := core.FindParameters{}
 
-	// If no matchers provided, return empty response
+	// If no matchers provided, we run a simple request with a low limit to prevent
+	// performance issues & long running requests
 	if len(matchers) == 0 {
-		// Grafana will try to get all class name when arriving explore page
-		// This prevent showing an error to the customer, while allowing to prevent performance
-		// bottleneck where the user is fetching 1M series
-		return resp, http.StatusOK, nil
+		matchers = append(matchers, "{__name__=~'"+DEFAULT_METRIC_SELECTOR+"'}")
+		params.GCount = DEFAULT_METRIC_SELECTOR_GCOUNT
 	}
 
 	// Process each matcher
@@ -420,9 +437,12 @@ func (p *QL) FindClassnames(token string, matchers []string, startTime time.Time
 		for _, m := range matcherObjs {
 			if m.Name == "__name__" {
 				hasNameMatcher = true
-				// Grafana will add .* suffix and prefix to the value, but the real minimal length is 3 chars
+				if m.Value == DEFAULT_METRIC_SELECTOR {
+					continue
+				}
+
 				if len(strings.TrimSpace(fmt.Sprintf("%v", m.Value))) < 7 {
-					return resp, http.StatusBadRequest, fmt.Errorf("Search must contain at least 3 characters")
+					return resp, http.StatusBadRequest, fmt.Errorf("search must contain at least 3 characters")
 				}
 			}
 		}
@@ -447,7 +467,7 @@ func (p *QL) FindClassnames(token string, matchers []string, startTime time.Time
 		findQuery := buildWarp10Selector(className, labels)
 		// We want to do a regex search by default to match series names
 		selector := "~" + findQuery.String()
-		gtss, err := warpServer.FindGTS(token, selector, startTime)
+		gtss, err := warpServer.FindGTS(token, selector, params)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"query": selector,
