@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-//WhereCond Where statement data
+// WhereCond Where statement data
 type WhereCond struct {
 	key   string
 	op    influxql.Token
@@ -306,8 +306,15 @@ func (p *InfluxParser) parseOperator(lhs influxql.Expr, op influxql.Token, rhs i
 		case *influxql.StringLiteral:
 			rhsValue := &influxql.VarRef{Type: influxql.String, Val: rhsExpr.String()}
 			eqTag := make([]*WhereCond, 1)
-			eqTag[0] = &WhereCond{key: lhs.String(), op: op, value: rhsValue}
-			eqTags = append(eqTags, eqTag)
+			if strings.HasSuffix(lhs.String(), "::tag") {
+				whereCondKey := strings.TrimSuffix(lhs.String(), "::tag")
+				eqTag[0] = &WhereCond{key: whereCondKey, op: op, value: rhsValue, isTag: true}
+				eqTags = append(eqTags, eqTag)
+			} else {
+				whereCondKey := strings.TrimSuffix(lhs.String(), "::field")
+				eqTag[0] = &WhereCond{key: whereCondKey, op: op, value: rhsValue}
+				eqTags = append(eqTags, eqTag)
+			}
 		case *influxql.BooleanLiteral:
 			rhsValue := &influxql.VarRef{Type: influxql.Boolean, Val: rhsExpr.String()}
 			eqTag := make([]*WhereCond, 1)
