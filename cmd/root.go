@@ -85,6 +85,10 @@ func initConfig() {
 	viper.SetDefault("prometheus.query.labels.replace.enabled", false)
 	viper.SetDefault("prometheus.query.labels.replace.map", make(map[string]string))
 
+	// Default time range limits for series endpoint
+	viper.SetDefault("warp10.find.activeafter.min", "24h")
+	viper.SetDefault("warp10.find.activeafter.max", "168h") // 7 days = 7 * 24 hours
+
 	// Load user defined config
 	cfgFile := viper.GetString("config")
 	if cfgFile != "" {
@@ -181,9 +185,11 @@ var RootCmd = &cobra.Command{
 		gPromQL.Any("/api/v1/query_range*", middlewares.Native(promQL.QueryRange))
 		gPromQL.Any("/api/v1/query*", middlewares.Native(promQL.InstantQuery))
 		gPromQL.Any("/api/v1/series*", middlewares.Native(promQL.FindAndDeleteSeries))
+		gPromQL.Any("/api/v1/labels", promQL.FindLabels)
+		gPromQL.Any("/api/v1/label/__name__/values*", promQL.FindClassnamesHandler)
 		gPromQL.Any("/api/v1/label/:label/values*", promQL.FindLabelsValues)
+		gPromQL.Any("/api/v1/label/:label/values", promQL.FindLabelsValues)
 		gPromQL.Any("/remote_read*", remoteRead.HandlerBuilder())
-
 		// Register graphite query language
 		gGraphite := r.Group("/graphite", middlewares.Protocol("graphite"), middlewares.Deny(tokens))
 		gGraphite.Any("/render*", middlewares.Native(graphite.Render))

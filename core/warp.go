@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
@@ -408,9 +409,29 @@ func (server *HTTPWarp10Server) Delete(token string, query string) error {
 	return nil
 }
 
+// FindParameters contains all parameters for the Find operation
+type FindParameters struct {
+	ActiveAfter time.Time
+	GCount     int
+}
+
 // Find is Simple Find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) Find(token string, selector string) (*http.Response, error) {
-	req, _ := http.NewRequest("GET", server.Endpoint+"/api/v0/find?selector="+selector, nil) // nolint: gas
+func (server *HTTPWarp10Server) Find(token string, selector string, params FindParameters) (*http.Response, error) {
+	endpoint := server.Endpoint + "/api/v0/find?selector=" + selector
+	if !params.ActiveAfter.IsZero() {
+		endpoint += "&activeafter=" + strconv.FormatInt(params.ActiveAfter.UnixMilli(), 10)
+	}
+	
+	// Add gcount parameter if specified
+	if params.GCount > 0 {
+		endpoint += "&gcount=" + strconv.Itoa(params.GCount)
+	}
+
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("X-Warp10-Token", token)
 	req.Header.Set("X-CityzenData-Token", token)
@@ -422,7 +443,7 @@ func (server *HTTPWarp10Server) Find(token string, selector string) (*http.Respo
 
 	if warpResp.StatusCode != 200 {
 		var body []byte
-		body, err = ioutil.ReadAll(warpResp.Body)
+		body, err = io.ReadAll(warpResp.Body)
 		if err != nil {
 			return nil, err
 		}
@@ -432,8 +453,8 @@ func (server *HTTPWarp10Server) Find(token string, selector string) (*http.Respo
 }
 
 // FindGTS is find, given the metric name and tags, and the start/end timestamps
-func (server *HTTPWarp10Server) FindGTS(token string, selector string) (*QueryResult, error) {
-	warpResp, err := server.Find(token, selector)
+func (server *HTTPWarp10Server) FindGTS(token string, selector string, params FindParameters) (*QueryResult, error) {
+	warpResp, err := server.Find(token, selector, params)
 	if err != nil {
 		return nil, err
 	}
