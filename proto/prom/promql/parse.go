@@ -54,6 +54,7 @@ func (e *ParseErr) Error() string {
 // ParseStmts parses the input and returns the resulting statements or any occurring error.
 func ParseStmts(input string) (Statements, error) {
 	p := newParser(input)
+	defer p.lex.close()
 
 	stmts, err := p.parseStmts()
 	if err != nil {
@@ -66,6 +67,7 @@ func ParseStmts(input string) (Statements, error) {
 // ParseExpr returns the expression parsed from the input.
 func ParseExpr(input string) (Expr, error) {
 	p := newParser(input)
+	defer p.lex.close()
 
 	expr, err := p.parseExpr()
 	if err != nil {
@@ -78,6 +80,7 @@ func ParseExpr(input string) (Expr, error) {
 // ParseMetric parses the input into a metric
 func ParseMetric(input string) (m labels.Labels, err error) {
 	p := newParser(input)
+	defer p.lex.close()
 	defer p.recover(&err)
 
 	m = p.metric()
@@ -91,6 +94,7 @@ func ParseMetric(input string) (m labels.Labels, err error) {
 // label matchers.
 func ParseMetricSelector(input string) (m []*labels.Matcher, err error) {
 	p := newParser(input)
+	defer p.lex.close()
 	defer p.recover(&err)
 
 	name := ""
@@ -162,6 +166,7 @@ func (v sequenceValue) String() string {
 // parseSeriesDesc parses the description of a time series.
 func parseSeriesDesc(input string) (labels.Labels, []sequenceValue, error) {
 	p := newParser(input)
+	defer p.lex.close()
 	p.lex.seriesDesc = true
 
 	return p.parseSeriesDesc()

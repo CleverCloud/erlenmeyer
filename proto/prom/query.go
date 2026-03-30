@@ -216,6 +216,9 @@ func (p *QL) QueryRange(w http.ResponseWriter, r *http.Request) {
 
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-query-range")
 	response, err := warpServer.Query(mc2, w.Header().Get(middlewares.TxnHeader))
+	if response != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		wErr := response.Header.Get("X-Warp10-Error-Message")
 		if wErr == "" {
@@ -412,6 +415,9 @@ func (p *QL) InstantQuery(w http.ResponseWriter, r *http.Request) {
 
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "prometheus-query-instant")
 	response, err := warpServer.Query(mc2, w.Header().Get(middlewares.TxnHeader))
+	if response != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		wErr := response.Header.Get("X-Warp10-Error-Message")
 		if wErr == "" {

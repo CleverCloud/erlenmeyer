@@ -224,6 +224,9 @@ func (p *InfluxParser) getSelectStatementScript(statement *influxql.SelectStatem
 		LMAP
 		`
 		findQuery, err := warpServer.Query(findmc2, txn)
+		if findQuery != nil {
+			defer findQuery.Body.Close()
+		}
 
 		if err != nil {
 			log.WithFields(log.Fields{

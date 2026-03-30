@@ -442,6 +442,7 @@ func (server *HTTPWarp10Server) Find(token string, selector string, params FindP
 	}
 
 	if warpResp.StatusCode != 200 {
+		defer warpResp.Body.Close()
 		var body []byte
 		body, err = io.ReadAll(warpResp.Body)
 		if err != nil {
