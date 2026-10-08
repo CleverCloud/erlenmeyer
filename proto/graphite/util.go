@@ -19,6 +19,9 @@ func execute(token, txn string, tree *core.Node) ([]byte, error) {
 	// remove NaN in Graphite
 	mc2 += "\n[ SWAP mapper.finite 0 0 0 ] MAP\n"
 	resp, err := server.Query(mc2, txn)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		wErr := resp.Header.Get("X-Warp10-Error-Message")
 		if wErr == "" {

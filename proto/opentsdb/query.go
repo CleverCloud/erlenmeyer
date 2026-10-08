@@ -323,6 +323,9 @@ func (o *OpenTSDB) HandleQueryLast(responseWriter http.ResponseWriter, request *
 
 	warpServer := core.NewWarpServer(viper.GetString("warp_endpoint"), "opentsdb-query-last")
 	response, err := warpServer.Query(outStr, responseWriter.Header().Get(middlewares.TxnHeader))
+	if response != nil {
+		defer response.Body.Close()
+	}
 	if err != nil {
 		o.ErrCounter.Inc()
 		message := "Bad response from Egress"

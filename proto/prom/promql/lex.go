@@ -330,7 +330,8 @@ type lexer struct {
 	start   Pos       // Start position of this item.
 	width   Pos       // Width of last rune read from input.
 	lastPos Pos       // Position of most recent item returned by nextItem.
-	items   chan item // Channel of scanned items.
+	items   chan item  // Channel of scanned items.
+	done    chan struct{} // Closed when the parser is done, unblocks the lexer goroutine.
 
 	parenDepth  int  // Nesting depth of ( ) exprs.
 	braceOpen   bool // Whether a { is opened.
@@ -368,8 +369,11 @@ func (l *lexer) backup() {
 
 // emit passes an item back to the client.
 func (l *lexer) emit(t ItemType) {
-	l.items <- item{t, l.start, l.input[l.start:l.pos]}
-	l.start = l.pos
+	select {
+	case l.items <- item{t, l.start, l.input[l.start:l.pos]}:
+		l.start = l.pos
+	case <-l.done:
+	}
 }
 
 // ignore skips over the pending input before this point.
@@ -414,7 +418,10 @@ func (l *lexer) linePosition() int {
 // errorf returns an error token and terminates the scan by passing
 // back a nil pointer that will be the next state, terminating l.nextItem.
 func (l *lexer) errorf(format string, args ...interface{}) stateFn {
-	l.items <- item{itemError, l.start, fmt.Sprintf(format, args...)}
+	select {
+	case l.items <- item{itemError, l.start, fmt.Sprintf(format, args...)}:
+	case <-l.done:
+	}
 	return nil
 }
 
@@ -430,6 +437,7 @@ func lex(input string) *lexer {
 	l := &lexer{
 		input: input,
 		items: make(chan item),
+		done:  make(chan struct{}),
 	}
 	go l.run()
 	return l
@@ -438,9 +446,24 @@ func lex(input string) *lexer {
 // run runs the state machine for the lexer.
 func (l *lexer) run() {
 	for l.state = lexStatements; l.state != nil; {
+		select {
+		case <-l.done:
+			return
+		default:
+		}
 		l.state = l.state(l)
 	}
 	close(l.items)
+}
+
+// close signals the lexer goroutine to stop.
+func (l *lexer) close() {
+	select {
+	case <-l.done:
+		// already closed
+	default:
+		close(l.done)
+	}
 }
 
 // lineComment is the character that starts a line comment.

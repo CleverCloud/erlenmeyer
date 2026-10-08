@@ -33,6 +33,9 @@ func Exec(ctx echo.Context) error {
 
 	server := core.NewWarpServer(viper.GetString("warp_endpoint"), "warp10-query")
 	res, err := server.Query(string(body), txn)
+	if res != nil {
+		defer res.Body.Close()
+	}
 	if err != nil {
 		log.WithError(err).Error("Cannot execute the request on the warp endpoint")
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{

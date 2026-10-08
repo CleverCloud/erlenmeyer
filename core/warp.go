@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -23,8 +24,8 @@ import (
 
 var (
 	// https://regex101.com/r/jlI5ad/1
-	tokenRegex = regexp.MustCompile(`(?mU)['"][a-zA-Z_.0-9]{80,}['"]`)
-	tokens     = make(map[string]string)
+	tokenRegex    = regexp.MustCompile(`(?mU)['"][a-zA-Z_.0-9]{80,}['"]`)
+	tokenAppCache = expirable.NewLRU[string, string](10000, nil, 10*time.Minute)
 
 	requests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "erlenmeyer",
@@ -187,8 +188,11 @@ func (server *HTTPWarp10Server) Query(body string, txn string) (*http.Response, 
 			return nil, errors.New("Unauthorized")
 		}
 
-		app, ok := tokens[token]
-		if !ok {
+		cached, ok := tokenAppCache.Get(token)
+		var app string
+		if ok {
+			app = cached
+		} else {
 			tokeninfo := fmt.Sprintf("'%s' TOKENINFO", token)
 			tokeninfo += " DUP <% 'type' GET ISNULL %> <% DROP 'notoken' STOP %> IFT"
 			tokeninfo += " DUP <% 'type' GET 'READ' == %> <% 'application' GET %> <% DROP 'write' %> IFTE"
@@ -229,7 +233,7 @@ func (server *HTTPWarp10Server) Query(body string, txn string) (*http.Response, 
 			}
 			app = appRes[0]
 
-			tokens[token] = app
+			tokenAppCache.Add(token, app)
 		}
 
 		// skip write tokens
@@ -442,6 +446,7 @@ func (server *HTTPWarp10Server) Find(token string, selector string, params FindP
 	}
 
 	if warpResp.StatusCode != 200 {
+		defer warpResp.Body.Close()
 		var body []byte
 		body, err = io.ReadAll(warpResp.Body)
 		if err != nil {

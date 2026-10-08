@@ -423,6 +423,9 @@ func (showStatement *InfluxShowStatement) parseInfluxSeries(statementid int, txn
 	log.Debug(mc2)
 
 	queryRes, err := warpServer.Query(mc2, txn)
+	if queryRes != nil {
+		defer queryRes.Body.Close()
+	}
 
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -851,6 +854,9 @@ func parseInfluxSelect(statement *influxql.SelectStatement, statementid int, txn
 	` + mc2
 
 	queryRes, err := warpServer.Query(mc2, txn)
+	if queryRes != nil {
+		defer queryRes.Body.Close()
+	}
 
 	if err != nil {
 		log.WithFields(log.Fields{
