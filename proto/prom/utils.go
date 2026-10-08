@@ -127,11 +127,13 @@ func warpToPrometheusResponseInstant(gtss []core.GeoTimeSeries, resultType strin
 
 	if len(gtss) == 1 && gtss[0].Class == "scalar" {
 		resp.ResultType = "scalar"
-		for _, value := range gtss[0].Values {
+		// A Prometheus scalar result is a single [ts, "value"] pair, not a list of pairs
+		if len(gtss[0].Values) > 0 {
+			value := gtss[0].Values[len(gtss[0].Values)-1]
 			ts := value[0].(float64) // Casting as gts is an interface
 			ts /= 1000000.0          // Moving from us to ms
-			v = fmt.Sprintf("%v", value[1])
-			resp.Result = append(resp.Result, []interface{}{ts, v})
+			v = fmt.Sprintf("%v", value[len(value)-1])
+			resp.Result = []interface{}{ts, v}
 		}
 		return resp, nil
 	}
